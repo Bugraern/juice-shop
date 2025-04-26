@@ -103,3 +103,18 @@ jobs:
         with:
           name: semgrep-sast-report
           path: semgrep/results/semgrep.sarif
+
+  deploy:
+    name: Simulate Deployment
+    # Bu işin başlaması için HEM build-and-sbom HEM DE sast-scan işlerinin bitmesi gerekir.
+    # NOT: Eğer önceki işlerde continue-on-error varsa, onlar "başarısız" olsa bile
+    # bu iş başlayabilir (job'lar iptal edilmediği sürece).
+    needs: [build-and-sbom, sast-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dummy Deploy Step
+        run: |
+          echo "Simulating deployment..."
+          echo "Deployment environment: Production"
+          echo "Deployment successful!"
+          # Gerçek deploy komutları buraya gelir
