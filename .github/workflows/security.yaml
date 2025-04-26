@@ -1,0 +1,48 @@
+# .github/workflows/build-and-sbom.yaml
+
+name: Build Juice Shop and Generate SBOM
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build_and_sbom:
+    runs-on: ubuntu-latest
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false 
+          load: true  
+          tags: juice-shop-local:latest 
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      - name: Generate SBOM from Docker image
+        run: |
+          syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
+          syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
+
+      - name: Upload SBOM artifact (SPDX)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-spdx
+          path: sbom-spdx.json
+
+      - name: Upload SBOM artifact (CycloneDX)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom-cyclonedx.json
