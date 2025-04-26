@@ -1,15 +1,70 @@
-# security.yaml
-version: '3.8'
+# .github/workflows/security.yaml
+# Bu dosya, GitHub Actions'ın bu iş akışını tanıması için .github/workflows/ dizininde olmalıdır.
 
-services:
-  juice-shop:
-    # Bulunduğun dizindeki Dockerfile'ı kullanarak build et
-    build: .
-    # Oluşturulacak imajın adı ve etiketi
-    image: juice-shop-local:latest
-    ports:
-      # Konteynerin 3000 portunu makinenin 3000 portuna bağla
-      - "3000:3000"
-    # Gerekirse ortam değişkenleri (environment variables) buraya eklenebilir
-    # environment:
-    #   - NODE_ENV=production
+name: Build Juice Shop and Generate SBOM
+
+# Bu iş akışının ne zaman tetikleneceğini belirler.
+# Örnek: main branch'ine push yapıldığında veya manuel olarak tetiklendiğinde.
+on:
+  push:
+    branches: [ main ] # Veya kullandığınız ana branch adı
+  workflow_dispatch: # Manuel tetikleme için
+
+jobs:
+  build_and_sbom:
+    runs-on: ubuntu-latest # İş akışının çalışacağı sanal makine ortamı
+
+    steps:
+      # Adım 1: Repoyu Checkout et
+      # Dockerfile'ın ve diğer gerekli dosyaların bulunduğu kodu çeker.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Adım 2: Docker Buildx'i Kur
+      # Daha verimli ve gelişmiş Docker build işlemleri için gereklidir.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Adım 3: Juice Shop Docker imajını oluştur
+      # NOT: Bu adımın çalışması için reponuzun kök dizininde bir 'Dockerfile' dosyası bulunmalıdır.
+      # Eğer Juice Shop'un resmi Dockerfile'ını kullanmak isterseniz, onu reponuza eklemelisiniz.
+      # Alternatif olarak, `context` ve `file` parametrelerini Juice Shop kodunun bulunduğu alt dizine yönlendirebilirsiniz.
+      - name: Build Docker image for Juice Shop
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Dockerfile'ın bulunduğu dizin (varsayılan: kök dizin)
+          file: ./Dockerfile # Kullanılacak Dockerfile adı ve yolu
+          push: false # İmajı bir registry'ye gönderme (sadece yerelde build et)
+          load: true # İmajı yerel Docker daemon'ına yükle (sonraki adımlarda kullanmak için)
+          tags: juice-shop-local:latest # İmaja verilecek etiket
+
+      # Adım 4: Syft SBOM aracını kur
+      # Anchore Syft, konteyner imajlarından ve dosya sistemlerinden SBOM oluşturmak için kullanılır.
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      # Adım 5: Docker imajından SBOM oluştur (SPDX formatında)
+      # Oluşturulan imajı tarar ve içindeki bileşenleri listeler.
+      - name: Generate SBOM from Docker image (SPDX JSON)
+        run: syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
+
+      # Adım 5b: Docker imajından SBOM oluştur (CycloneDX formatında)
+      # Aynı imajı tarayıp farklı bir formatta SBOM üretir.
+      - name: Generate SBOM from Docker image (CycloneDX JSON)
+        run: syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
+
+      # Adım 6: Oluşturulan SBOM dosyalarını Artifact olarak yükle
+      # İş akışı tamamlandığında bu dosyalara erişebilmek için kullanılır.
+      - name: Upload SBOM artifact (SPDX)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-spdx # Artifact adı
+          path: sbom-spdx.json # Yüklenecek dosya
+
+      - name: Upload SBOM artifact (CycloneDX)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx # Artifact adı
+          path: sbom-cyclonedx.json # Yüklenecek dosya
