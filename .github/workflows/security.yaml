@@ -9,6 +9,37 @@ on:
 
 jobs:
   build-and-sbom:
+        # -------------------- YENİ ADIMLAR: ZAP DAST Taraması -------------
+      # 3.2: ZAP Baseline Tarama (example.com'a karşı)
+      - name: Run ZAP Baseline Scan against Example.com
+        # ZAP bulgu bulursa çıkış kodu > 0 verebilir. Raporu almak için devam et:
+        continue-on-error: true
+        run: |
+          # Raporların kaydedileceği dizini oluştur
+          mkdir -p zap-results
+          # ZAP Docker imajını kullanarak baseline taramasını çalıştır
+          echo "Starting ZAP baseline scan against https://www.example.com..."
+          docker run --rm \
+            -v $(pwd)/zap-results:/zap/wrk/:rw \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+            -t https://www.example.com \
+            -r zap_baseline_report.html \
+            -J zap_baseline_report.json \
+            -l PASS # Sadece PASS seviyesindeki informational alert'leri raporla (daha az gürültü için)
+            # Daha kapsamlı tarama veya farklı ayarlar için ZAP dökümanlarına bakınız.
+          echo "ZAP scan finished."
+
+      # 3.3: ZAP Raporlarını Artifact olarak yükle
+      - name: Upload ZAP Report Artifacts
+        # ZAP adımı continue-on-error nedeniyle başarısız işaretlense bile yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-baseline-reports
+          # Oluşturulan raporları içeren dizini yükle
+          path: zap-results/
+      # -------------------- DAST Taraması Bitti -------------------------
     name: Secrets, Build and SBOM
     runs-on: ubuntu-latest
     steps:
