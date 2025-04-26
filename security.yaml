@@ -1,0 +1,15 @@
+# security.yaml
+version: '3.8'
+
+services:
+  juice-shop:
+    # Bulunduğun dizindeki Dockerfile'ı kullanarak build et
+    build: .
+    # Oluşturulacak imajın adı ve etiketi
+    image: juice-shop-local:latest
+    ports:
+      # Konteynerin 3000 portunu makinenin 3000 portuna bağla
+      - "3000:3000"
+    # Gerekirse ortam değişkenleri (environment variables) buraya eklenebilir
+    # environment:
+    #   - NODE_ENV=production
