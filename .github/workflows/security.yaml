@@ -1,6 +1,6 @@
 # .github/workflows/security.yaml (veya build-and-sbom.yaml)
 
-name: Build, SBOM, and SAST Scan
+name: SAST Scan, Build, and SBOM Generation
 
 on:
   push:
@@ -16,11 +16,37 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Adım: Docker Buildx'i kur (modern build için)
+      # -------------------- SAST Taraması (Başa Alındı) --------------------
+      # 2. Adım: Semgrep SAST Taramasını Çalıştır
+      - name: Run Semgrep SAST Scan
+        uses: semgrep/semgrep-action@v1
+        id: semgrep
+        with:
+          # === DEĞİŞİKLİK BURADA ===
+          # 'generate_sarif' kaldırıldı.
+          # Kurallar 'config' ile belirtildi.
+          # SARIF çıktısı için gerekli argümanlar 'args' ile eklendi.
+          config: "p/default" # Kullanılacak kural seti (örn: varsayılanlar)
+          args: "--sarif -o semgrep.sarif" # Semgrep CLI'a iletilecek argümanlar
+
+      # 3. Adım (Hata Ayıklama İçin): Dosyaları Listele
+      - name: List files after Semgrep
+        run: ls -la
+        if: always() # Sorun çözüldüğünde bu adım kaldırılabilir.
+
+      # 4. Adım: Semgrep SARIF Sonuçlarını Yükle (GitHub Security Tab için)
+      - name: Upload Semgrep SARIF to GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif # Şimdi bu dosyanın oluşturulmuş olması lazım
+      # -------------------- SAST Taraması Bitti ---------------------------
+
+      # 5. Adım: Docker Buildx'i kur
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 3. Adım: Docker imajını build et
+      # 6. Adım: Docker imajını build et
+      # ... (geri kalan adımlar aynı) ...
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -30,19 +56,19 @@ jobs:
           load: true
           tags: juice-shop-local:latest
 
-      # 4. Adım: Syft SBOM aracını kur
+      # 7. Adım: Syft SBOM aracını kur
       - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
           syft version
 
-      # 5. Adım: SBOM oluştur (SPDX ve CycloneDX formatlarında)
+      # 8. Adım: SBOM oluştur (SPDX ve CycloneDX formatlarında)
       - name: Generate SBOM from Docker image
         run: |
           syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
           syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
 
-      # 6. Adım: Oluşturulan SBOM dosyalarını artifact olarak kaydet
+      # 9. Adım: Oluşturulan SBOM dosyalarını artifact olarak kaydet
       - name: Upload SBOM artifact (SPDX)
         uses: actions/upload-artifact@v4
         with:
@@ -54,21 +80,3 @@ jobs:
         with:
           name: sbom-cyclonedx
           path: sbom-cyclonedx.json
-
-      # -------------------- SAST Taraması (Sona Alındı) --------------------
-      # 7. Adım: Semgrep SAST Taramasını Çalıştır
-      # Kaynak kodu tarar (Build veya SBOM sonucunu değil!)
-      - name: Run Semgrep SAST Scan
-        uses: semgrep/semgrep-action@v1
-        id: semgrep # Sonraki adımlarda referans vermek için id ekleyebiliriz (opsiyonel)
-        with:
-          generate_sarif: "true"
-
-      # 8. Adım: Semgrep SARIF Sonuçlarını Yükle
-      # Sadece önceki Semgrep adımı başarılı olursa çalışır.
-      - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        # if: always() # <= KALDIRILDI! Şimdi sadece Semgrep başarılı olursa çalışacak.
-        with:
-          sarif_file: semgrep.sarif
-      # -------------------- SAST Taraması Bitti ---------------------------
