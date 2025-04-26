@@ -1,41 +1,68 @@
-# .github/workflows/build-and-sbom.yaml
+# .github/workflows/build-and-sbom.yaml (veya security.yaml)
 
-name: Build Juice Shop and Generate SBOM
+name: Build, SAST Scan, and SBOM Generation
+
 on:
   push:
-    branches: [ main ]
+    branches: [ main ] # Veya kendi ana branch'inizin adı
   workflow_dispatch:
 
 jobs:
-  build_and_sbom:
+  security_pipeline: # İşin adını daha genel hale getirebiliriz
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Adım: Depodaki kodu (Dockerfile dahil) al
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -------------------- YENİ ADIMLAR: SAST Taraması --------------------
+      # 2. Adım: Semgrep SAST Taramasını Çalıştır
+      # Kaynak kodu taramak için resmi Semgrep GitHub Action'ını kullanır.
+      # Varsayılan olarak popüler kuralları (p/default) kullanır.
+      - name: Run Semgrep SAST Scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          # SARIF formatında çıktı üreterek GitHub Security tab'ı ile entegrasyon sağlar
+          generate_sarif: "true" # String olarak "true" vermek daha güvenli olabilir
+
+      # 3. Adım: Semgrep SARIF Sonuçlarını Yükle
+      # Semgrep tarafından oluşturulan 'semgrep.sarif' dosyasını GitHub'a yükler.
+      # Sonuçlar reponun "Security" -> "Code scanning alerts" bölümünde görünür.
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always() # Önceki adım başarısız olsa bile sonucu yüklemeyi dene (isteğe bağlı)
+        with:
+          sarif_file: semgrep.sarif # Semgrep action'ın varsayılan çıktı dosyası
+      # -------------------- SAST Taraması Bitti ---------------------------
+
+      # 4. Adım: Docker Buildx'i kur (modern build için)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # 5. Adım: Docker imajını build et
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
-          push: false 
-          load: true  
-          tags: juice-shop-local:latest 
+          push: false
+          load: true
+          tags: juice-shop-local:latest
 
+      # 6. Adım: Syft SBOM aracını kur
       - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
           syft version
 
+      # 7. Adım: SBOM oluştur (SPDX ve CycloneDX formatlarında)
       - name: Generate SBOM from Docker image
         run: |
           syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
           syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
 
+      # 8. Adım: Oluşturulan SBOM dosyalarını artifact olarak kaydet
       - name: Upload SBOM artifact (SPDX)
         uses: actions/upload-artifact@v4
         with:
