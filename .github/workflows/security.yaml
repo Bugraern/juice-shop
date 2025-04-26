@@ -9,7 +9,36 @@ on:
 
 jobs:
   build-and-sbom:
-        # -------------------- YENİ ADIMLAR: ZAP DAST Taraması -------------
+    name: Secrets, Build and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secrets Scan
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_REDACT: "true"
+          GITLEAKS_REPORT_FORMAT: "sarif"
+          GITLEAKS_REPORT_PATH: "gitleaks.sarif"
+
+      - name: List files after Gitleaks
+        run: ls -la
+        if: always()
+
+      - name: Upload Gitleaks SARIF to GitHub Security Tab
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks.sarif
+          path: .
+
+              # -------------------- YENİ ADIMLAR: ZAP DAST Taraması -------------
       # 3.2: ZAP Baseline Tarama (example.com'a karşı)
       - name: Run ZAP Baseline Scan against Example.com
         # ZAP bulgu bulursa çıkış kodu > 0 verebilir. Raporu almak için devam et:
@@ -40,36 +69,6 @@ jobs:
           # Oluşturulan raporları içeren dizini yükle
           path: zap-results/
       # -------------------- DAST Taraması Bitti -------------------------
-    name: Secrets, Build and SBOM
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Gitleaks Secrets Scan
-        uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
-        env:
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_REDACT: "true"
-          GITLEAKS_REPORT_FORMAT: "sarif"
-          GITLEAKS_REPORT_PATH: "gitleaks.sarif"
-
-      - name: List files after Gitleaks
-        run: ls -la
-        if: always()
-
-      - name: Upload Gitleaks SARIF to GitHub Security Tab
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: gitleaks.sarif
-          path: .
-
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         # ... (Diğer adımlar aynı kalır, sadece numaraları değişir) ...
