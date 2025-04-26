@@ -15,43 +15,44 @@ jobs:
     steps:
       # 1.1: Kodu al
       - name: Checkout repository
-        # Fetch depth 0 needed for Gitleaks to scan full history
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -------------------- YENİ ADIMLAR: Gitleaks Secret Taraması --------
+      # -------------------- Gitleaks Secret Taraması (Güncellendi) --------
       # 1.2: Gitleaks ile Secret Taraması
       - name: Run Gitleaks Secrets Scan
         uses: gitleaks/gitleaks-action@v2
-        # Secret bulursa çıkış kodu 1 verir. Workflow'a devam etmek için:
         continue-on-error: true
         env:
-          # GitHub token genellikle API etkileşimleri için önerilir.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Rapor formatını SARIF olarak ayarla
-          GITLEAKS_REPORT_FORMAT: sarif
-          # Raporun kaydedileceği yolu belirt (varsayılan da bu olabilir)
-          GITLEAKS_REPORT_PATH: "${{ github.workspace }}/gitleaks.sarif"
-          # Bulunan secret'ların loglarda görünmesini engelle (güvenlik için)
           GITLEAKS_REDACT: "true"
+          GITLEAKS_REPORT_FORMAT: "sarif"
+          # Yolu basitleştirelim, sadece dosya adı:
+          GITLEAKS_REPORT_PATH: "gitleaks.sarif" # <-- DEĞİŞTİ
 
-      # 1.3: Gitleaks SARIF dosyasını GitHub Security Tab'a yükle
+      # 1.3 (Hata Ayıklama İçin): Dosyaları Listele
+      # Gitleaks adımından sonra gitleaks.sarif dosyasının varlığını kontrol et.
+      - name: List files after Gitleaks
+        run: ls -la
+        if: always() # Her durumda çalışsın ki görelim
+
+      # 1.4: Gitleaks SARIF dosyasını GitHub Security Tab'a yükle (Güncellendi)
       - name: Upload Gitleaks SARIF to GitHub Security Tab
         uses: github/codeql-action/upload-sarif@v3
-        # Gitleaks adımı secret bulduğu için başarısız işaretlense bile yükle
         if: always()
         with:
-          sarif_file: "${{ github.workspace }}/gitleaks.sarif"
-          # İsteğe bağlı: Semgrep'ten ayırmak için kategori belirtebilirsin
-          # category: gitleaks-secrets
+          # Yolu basitleştirelim, sadece dosya adı:
+          sarif_file: "gitleaks.sarif" # <-- DEĞİŞTİ
+          # category: gitleaks-secrets # İsteğe bağlı
       # -------------------- Gitleaks Taraması Bitti ----------------------
 
-      # 1.4: Docker Buildx'i kur (Adım numarası güncellendi)
+      # 1.5: Docker Buildx'i kur (Adım numarası güncellendi)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        # ... (Diğer adımlar aynı kalır, sadece numaraları değişir) ...
 
-      # 1.5: Docker imajını build et (Adım numarası güncellendi)
+      # 1.6: Docker imajını build et
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -61,25 +62,24 @@ jobs:
           load: true
           tags: juice-shop-local:latest
 
-      # 1.6: Syft SBOM aracını kur (Adım numarası güncellendi)
+      # 1.7: Syft SBOM aracını kur
       - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
           syft version
 
-      # 1.7: SBOM oluştur (Adım numarası güncellendi)
+      # 1.8: SBOM oluştur
       - name: Generate SBOM from Docker image
         run: |
           syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
           syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
 
-      # 1.8: Oluşturulan SBOM dosyalarını artifact olarak kaydet (Adım numarası güncellendi)
+      # 1.9: SBOM dosyalarını artifact olarak kaydet
       - name: Upload SBOM artifact (SPDX)
         uses: actions/upload-artifact@v4
         with:
           name: sbom-spdx
           path: sbom-spdx.json
-
       - name: Upload SBOM artifact (CycloneDX)
         uses: actions/upload-artifact@v4
         with:
@@ -88,30 +88,24 @@ jobs:
 
   # ----- JOB 2: SAST Scan using Semgrep (runs after Job 1) -----
   sast-scan:
+    # ... (Bu iş aynı kalır) ...
     name: SAST Scan (Semgrep)
     needs: build-and-sbom
     runs-on: ubuntu-latest
     container: returntocorp/semgrep
     steps:
-      # 2.1: Kodu al
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # 2.2: Semgrep taramasını çalıştır ve sonucu kaydet
       - name: Run Semgrep Scan
         continue-on-error: true
         run: |
           mkdir -p semgrep/results
           semgrep ci --config=auto --sarif --output=semgrep/results/semgrep.sarif
-
-      # 2.3: Semgrep SARIF dosyasını GitHub Security Tab'a yükle
       - name: Upload SARIF file to GitHub Security Tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: semgrep/results/semgrep.sarif
-
-      # 2.4: Semgrep SARIF dosyasını indirilebilir artifact olarak yükle
       - name: Upload Semgrep report as Artifact
         uses: actions/upload-artifact@v4
         if: always()
