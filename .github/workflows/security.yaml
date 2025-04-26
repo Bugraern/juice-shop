@@ -1,6 +1,6 @@
-# .github/workflows/security.yaml (veya build-and-sbom.yaml)
+# .github/workflows/security-pipeline.yaml (Dosya adını değiştirebilirsin)
 
-name: SAST Scan, Build, and SBOM Generation
+name: Security Pipeline (Build, SBOM, SAST)
 
 on:
   push:
@@ -8,45 +8,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  security_pipeline:
+  # ----- JOB 1: Build Docker Image and Generate SBOM -----
+  build-and-sbom:
+    name: Build and SBOM Generation
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Adım: Depodaki kodu (Dockerfile dahil) al
+      # 1.1: Kodu al
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # -------------------- SAST Taraması (Başa Alındı) --------------------
-      # 2. Adım: Semgrep SAST Taramasını Çalıştır
-      - name: Run Semgrep SAST Scan
-        uses: semgrep/semgrep-action@v1
-        id: semgrep
-        with:
-          # === DEĞİŞİKLİK BURADA ===
-          # 'generate_sarif' kaldırıldı.
-          # Kurallar 'config' ile belirtildi.
-          # SARIF çıktısı için gerekli argümanlar 'args' ile eklendi.
-          config: "p/default" # Kullanılacak kural seti (örn: varsayılanlar)
-          args: "--sarif -o semgrep.sarif" # Semgrep CLI'a iletilecek argümanlar
-
-      # 3. Adım (Hata Ayıklama İçin): Dosyaları Listele
-      - name: List files after Semgrep
-        run: ls -la
-        if: always() # Sorun çözüldüğünde bu adım kaldırılabilir.
-
-      # 4. Adım: Semgrep SARIF Sonuçlarını Yükle (GitHub Security Tab için)
-      - name: Upload Semgrep SARIF to GitHub Security Tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif # Şimdi bu dosyanın oluşturulmuş olması lazım
-      # -------------------- SAST Taraması Bitti ---------------------------
-
-      # 5. Adım: Docker Buildx'i kur
+      # 1.2: Docker Buildx'i kur
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 6. Adım: Docker imajını build et
-      # ... (geri kalan adımlar aynı) ...
+      # 1.3: Docker imajını build et
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -56,19 +31,19 @@ jobs:
           load: true
           tags: juice-shop-local:latest
 
-      # 7. Adım: Syft SBOM aracını kur
+      # 1.4: Syft SBOM aracını kur
       - name: Install Syft
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
           syft version
 
-      # 8. Adım: SBOM oluştur (SPDX ve CycloneDX formatlarında)
+      # 1.5: SBOM oluştur (SPDX ve CycloneDX formatlarında)
       - name: Generate SBOM from Docker image
         run: |
           syft packages docker:juice-shop-local:latest -o spdx-json=sbom-spdx.json
           syft packages docker:juice-shop-local:latest -o cyclonedx-json=sbom-cyclonedx.json
 
-      # 9. Adım: Oluşturulan SBOM dosyalarını artifact olarak kaydet
+      # 1.6: Oluşturulan SBOM dosyalarını artifact olarak kaydet
       - name: Upload SBOM artifact (SPDX)
         uses: actions/upload-artifact@v4
         with:
@@ -80,3 +55,40 @@ jobs:
         with:
           name: sbom-cyclonedx
           path: sbom-cyclonedx.json
+
+  # ----- JOB 2: SAST Scan using Semgrep (runs after Job 1) -----
+  sast-scan:
+    name: SAST Scan (Semgrep)
+    # Bu işin başlaması için 'build-and-sbom' işinin başarıyla bitmesi gerekir
+    needs: build-and-sbom
+    runs-on: ubuntu-latest
+    # Adımlar Semgrep konteyneri içinde çalışacak
+    container: returntocorp/semgrep
+
+    steps:
+      # 2.1: Kodu al (Konteyner içinde /github/workspace altına alınır)
+      # NOT: Her iş ayrı bir ortamda başlayabilir, bu yüzden checkout genellikle tekrar gerekir.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2.2: Semgrep taramasını çalıştır ve sonucu kaydet
+      - name: Run Semgrep Scan
+        run: |
+          mkdir -p semgrep/results
+          semgrep ci --config=auto --sarif --output=semgrep/results/semgrep.sarif
+
+      # 2.3: Semgrep SARIF dosyasını GitHub Security Tab'a yükle
+      - name: Upload SARIF file to GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep/results/semgrep.sarif
+
+      # 2.4: Semgrep SARIF dosyasını indirilebilir artifact olarak yükle
+      - name: Upload Semgrep report as Artifact
+        uses: actions/upload-artifact@v4
+        # 'if: always()' tarama başarısız olsa bile yüklemeyi dener.
+        if: always()
+        with:
+          name: semgrep-sast-report # Artifact adı
+          path: semgrep/results/semgrep.sarif # Yüklenecek dosyanın yolu
